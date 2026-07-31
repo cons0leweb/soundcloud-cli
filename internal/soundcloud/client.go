@@ -14,18 +14,22 @@ import (
 
 // Track is the small, UI-facing subset of SoundCloud metadata.
 type Track struct {
-	Title      string
-	Artist     string
-	URL        string
-	Duration   int
-	Plays      int64
-	Collection bool
-	TrackIDs   []int64
+	Title        string
+	Artist       string
+	URL          string
+	Duration     int
+	Plays        int64
+	Collection   bool
+	TrackIDs     []int64
+	Personalized bool
 }
 
 // Expand returns tracks from either an authenticated system mix or a public set.
 func (c *Client) Expand(ctx context.Context, collection Track) ([]Track, error) {
-	if len(collection.TrackIDs) > 0 {
+	if collection.Personalized {
+		if len(collection.TrackIDs) == 0 {
+			return nil, errors.New("SoundCloud не передал треки персонального микса; обновите HAR-сессию")
+		}
 		if err := c.requireAPI(); err != nil {
 			return nil, err
 		}

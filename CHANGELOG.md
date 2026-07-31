@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-31
+
+### Fixed
+
+- Personal mixes now accept SoundCloud container URNs and numeric or quoted track IDs.
+- Personal mixes no longer fall back to public search and show `nothing found`.
+
+### Added
+
+- Persistent playback queue with automatic next-track playback.
+- Shuffle and repeat-all/repeat-one modes.
+- Runtime volume and mute controls.
+- Redesigned responsive interface with navigation tabs, progress, queue position, and keyboard help.
+
 ## [0.1.0] - 2026-07-31
 
 ### Added
@@ -15,5 +29,6 @@ All notable changes to this project are documented here. The format follows [Kee
 - Automatic local cookie and HAR discovery with a public mode fallback.
 - Linux, macOS, and Windows release archives.
 
-[Unreleased]: https://github.com/cons0leweb/soundcloud-cli/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/cons0leweb/soundcloud-cli/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/cons0leweb/soundcloud-cli/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/cons0leweb/soundcloud-cli/releases/tag/v0.1.0

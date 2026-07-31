@@ -22,6 +22,8 @@ type catalog interface {
 type audioPlayer interface {
 	Play(string) (<-chan error, error)
 	TogglePause() (bool, error)
+	AdjustVolume(int) (int, error)
+	ToggleMute() (bool, error)
 	Stop()
 }
 
@@ -50,11 +52,15 @@ type Model struct {
 	statusText     string
 	spinner        int
 	catalogRequest int
+	activeView     string
+	helpVisible    bool
 
 	playback     playbackState
-	playingIndex int
 	currentTrack soundcloud.Track
 	hasCurrent   bool
+	queue        playbackQueue
+	volume       int
+	muted        bool
 	playRequest  int
 	startedAt    time.Time
 	pausedAt     time.Time
@@ -66,15 +72,18 @@ type viewSnapshot struct {
 	query  []rune
 	tracks []soundcloud.Track
 	cursor int
+	view   string
 }
 
 func New(catalog catalog, player audioPlayer) Model {
 	return Model{
-		catalog:      catalog,
-		player:       player,
-		searchFocus:  true,
-		playingIndex: -1,
-		statusText:   "Введите запрос и нажмите Enter",
+		catalog:     catalog,
+		player:      player,
+		searchFocus: true,
+		queue:       newPlaybackQueue(),
+		volume:      80,
+		activeView:  "search",
+		statusText:  "Введите запрос и нажмите Enter",
 	}
 }
 
@@ -105,9 +114,13 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.tracks = msg.tracks
 		m.cursor = 0
-		m.playingIndex = m.currentIndex(msg.tracks)
 		if msg.browse || msg.section {
 			m.query = []rune(msg.title)
+		}
+		if msg.section {
+			m.activeView = msg.view
+		} else if !msg.browse {
+			m.activeView = "search"
 		}
 		if !msg.browse {
 			m.history = nil
@@ -134,6 +147,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.playback = playbackPlaying
+		m.muted = false
 		m.startedAt = time.Now()
 		m.pausedFor = 0
 		m.errorText = ""
@@ -143,11 +157,17 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.request != m.playRequest {
 			return m, nil
 		}
-		m.playback = playbackStopped
-		m.statusText = "Воспроизведение завершено"
 		if msg.err != nil {
+			m.playback = playbackStopped
 			m.errorText = "Воспроизведение неожиданно завершилось"
+			m.statusText = "Воспроизведение завершено"
+			return m, nil
 		}
+		if next := m.queue.next(false); next >= 0 {
+			return m.beginQueuedPlayback(next)
+		}
+		m.playback = playbackStopped
+		m.statusText = "Очередь завершена"
 		return m, nil
 	case tea.KeyMsg:
 		return m.handleKey(msg)
@@ -159,6 +179,12 @@ func (m Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if key.String() == "ctrl+c" {
 		m.player.Stop()
 		return m, tea.Quit
+	}
+	if m.helpVisible {
+		if key.String() == "?" || key.String() == "esc" || key.String() == "q" {
+			m.helpVisible = false
+		}
+		return m, nil
 	}
 
 	if m.searchFocus {
@@ -204,6 +230,9 @@ func (m Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		m.searchFocus = true
 		return m, nil
+	case "?":
+		m.helpVisible = true
+		return m, nil
 	case "j", "down":
 		if m.cursor < len(m.tracks)-1 {
 			m.cursor++
@@ -224,15 +253,15 @@ func (m Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.query = append([]rune(nil), last.query...)
 			m.tracks = last.tracks
 			m.cursor = last.cursor
-			m.playingIndex = m.currentIndex(last.tracks)
+			m.activeView = last.view
 			m.statusText = "Возврат к предыдущему списку"
 		}
 	case "m":
-		return m.loadSection("Персональные миксы", m.catalog.Mixes)
+		return m.loadSection("Персональные миксы", "mixes", m.catalog.Mixes)
 	case "l":
-		return m.loadSection("Мои лайки", m.catalog.Likes)
+		return m.loadSection("Мои лайки", "likes", m.catalog.Likes)
 	case "h":
-		return m.loadSection("История прослушивания", m.catalog.History)
+		return m.loadSection("История прослушивания", "history", m.catalog.History)
 	case " ":
 		if m.playback != playbackPlaying && m.playback != playbackPaused {
 			return m, nil
@@ -254,20 +283,32 @@ func (m Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "s":
 		m.stopPlayback("Остановлено")
 	case "n":
-		if len(m.tracks) > 0 {
-			base := m.playingIndex
-			if base < 0 {
-				base = m.cursor
-			}
-			return m.beginPlayback((base + 1) % len(m.tracks))
+		if next := m.queue.next(true); next >= 0 {
+			return m.beginQueuedPlayback(next)
 		}
 	case "p":
-		if len(m.tracks) > 0 {
-			base := m.playingIndex
-			if base < 0 {
-				base = m.cursor
+		if previous := m.queue.previous(); previous >= 0 {
+			return m.beginQueuedPlayback(previous)
+		}
+	case "z":
+		m.queue.shuffle = !m.queue.shuffle
+		m.statusText = map[bool]string{true: "Случайный порядок включён", false: "Случайный порядок выключен"}[m.queue.shuffle]
+	case "r":
+		m.queue.cycleRepeat()
+		m.statusText = "Повтор: " + m.repeatLabel()
+	case "+", "=":
+		return m.adjustVolume(5)
+	case "-":
+		return m.adjustVolume(-5)
+	case "x":
+		if m.playback == playbackPlaying || m.playback == playbackPaused {
+			muted, err := m.player.ToggleMute()
+			if err != nil {
+				m.errorText = err.Error()
+				return m, nil
 			}
-			return m.beginPlayback((base - 1 + len(m.tracks)) % len(m.tracks))
+			m.muted = muted
+			m.statusText = map[bool]string{true: "Звук выключен", false: "Звук включён"}[muted]
 		}
 	}
 	return m, nil
@@ -279,6 +320,7 @@ func (m Model) browseCollection(index int) (tea.Model, tea.Cmd) {
 		query:  append([]rune(nil), m.query...),
 		tracks: m.tracks,
 		cursor: m.cursor,
+		view:   m.activeView,
 	})
 	m.searching = true
 	m.catalogRequest++
@@ -287,7 +329,7 @@ func (m Model) browseCollection(index int) (tea.Model, tea.Cmd) {
 	return m, collectionCmd(m.catalog, track, track.Title, m.catalogRequest)
 }
 
-func (m Model) loadSection(title string, load func(context.Context) ([]soundcloud.Track, error)) (tea.Model, tea.Cmd) {
+func (m Model) loadSection(title, view string, load func(context.Context) ([]soundcloud.Track, error)) (tea.Model, tea.Cmd) {
 	if m.searching {
 		return m, nil
 	}
@@ -295,23 +337,34 @@ func (m Model) loadSection(title string, load func(context.Context) ([]soundclou
 	m.catalogRequest++
 	m.errorText = ""
 	m.statusText = "Загружаю: " + title
-	return m, sectionCmd(load, title, m.catalogRequest)
+	return m, sectionCmd(load, title, view, m.catalogRequest)
 }
 
 func (m Model) beginPlayback(index int) (tea.Model, tea.Cmd) {
 	if index < 0 || index >= len(m.tracks) {
 		return m, nil
 	}
+	selected := m.tracks[index]
+	queueIndex := m.queue.replace(m.tracks, selected.URL)
+	return m.beginQueuedPlayback(queueIndex)
+}
+
+func (m Model) beginQueuedPlayback(index int) (tea.Model, tea.Cmd) {
+	track, ok := m.queue.selectIndex(index)
+	if !ok {
+		return m, nil
+	}
 	m.player.Stop()
 	m.playRequest++
-	m.playingIndex = index
-	m.currentTrack = m.tracks[index]
+	m.currentTrack = track
 	m.hasCurrent = true
-	m.cursor = index
+	if current := m.currentIndex(m.tracks); current >= 0 {
+		m.cursor = current
+	}
 	m.playback = playbackLoading
 	m.errorText = ""
 	m.statusText = "Получаю аудиопоток"
-	return m, startPlaybackCmd(m.catalog, m.tracks[index], m.playRequest)
+	return m, startPlaybackCmd(m.catalog, track, m.playRequest)
 }
 
 func (m Model) currentIndex(tracks []soundcloud.Track) int {
@@ -324,6 +377,32 @@ func (m Model) currentIndex(tracks []soundcloud.Track) int {
 		}
 	}
 	return -1
+}
+
+func (m Model) adjustVolume(delta int) (tea.Model, tea.Cmd) {
+	if m.playback != playbackPlaying && m.playback != playbackPaused {
+		return m, nil
+	}
+	volume, err := m.player.AdjustVolume(delta)
+	if err != nil {
+		m.errorText = err.Error()
+		return m, nil
+	}
+	m.volume = volume
+	m.muted = false
+	m.statusText = fmt.Sprintf("Громкость: %d%%", volume)
+	return m, nil
+}
+
+func (m Model) repeatLabel() string {
+	switch m.queue.repeat {
+	case repeatAll:
+		return "вся очередь"
+	case repeatOne:
+		return "один трек"
+	default:
+		return "выключен"
+	}
 }
 
 func (m *Model) stopPlayback(status string) {
@@ -356,6 +435,7 @@ type searchResultMsg struct {
 	browse  bool
 	section bool
 	title   string
+	view    string
 	request int
 }
 
@@ -385,12 +465,12 @@ func searchCmd(c catalog, query string, browse, section bool, title string, requ
 	}
 }
 
-func sectionCmd(load func(context.Context) ([]soundcloud.Track, error), title string, request int) tea.Cmd {
+func sectionCmd(load func(context.Context) ([]soundcloud.Track, error), title, view string, request int) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		tracks, err := load(ctx)
-		return searchResultMsg{tracks: tracks, err: err, section: true, title: title, request: request}
+		return searchResultMsg{tracks: tracks, err: err, section: true, title: title, view: view, request: request}
 	}
 }
 

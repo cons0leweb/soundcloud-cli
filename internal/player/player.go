@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"os/exec"
+	"strconv"
 	"sync"
 )
 
@@ -14,10 +15,12 @@ type Player struct {
 	cmd    *exec.Cmd
 	input  io.WriteCloser
 	paused bool
+	volume int
+	muted  bool
 }
 
 func New(binary string) *Player {
-	return &Player{binary: binary}
+	return &Player{binary: binary, volume: 80}
 }
 
 // Play replaces the current stream and returns a channel that reports its end.
@@ -30,7 +33,7 @@ func (p *Player) Play(streamURL string) (<-chan error, error) {
 		"-nodisp",
 		"-autoexit",
 		"-loglevel", "quiet",
-		"-volume", "80",
+		"-volume", strconv.Itoa(p.volume),
 		streamURL,
 	)
 	cmd.Stdout = io.Discard
@@ -47,6 +50,7 @@ func (p *Player) Play(streamURL string) (<-chan error, error) {
 	p.cmd = cmd
 	p.input = input
 	p.paused = false
+	p.muted = false
 	done := make(chan error, 1)
 	go func() {
 		err := cmd.Wait()
@@ -55,6 +59,7 @@ func (p *Player) Play(streamURL string) (<-chan error, error) {
 			p.cmd = nil
 			p.input = nil
 			p.paused = false
+			p.muted = false
 		}
 		p.mu.Unlock()
 		done <- err
@@ -70,11 +75,59 @@ func (p *Player) TogglePause() (bool, error) {
 	if p.cmd == nil || p.cmd.Process == nil || p.input == nil {
 		return false, errors.New("nothing is playing")
 	}
-	if _, err := io.WriteString(p.input, "p"); err != nil {
+	if err := p.sendKeyLocked("p"); err != nil {
 		return p.paused, err
 	}
 	p.paused = !p.paused
 	return p.paused, nil
+}
+
+// AdjustVolume changes ffplay volume in five-point steps.
+func (p *Player) AdjustVolume(delta int) (int, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.cmd == nil || p.input == nil {
+		return p.volume, errors.New("nothing is playing")
+	}
+	target := max(0, min(100, p.volume+delta))
+	key := "0"
+	if target < p.volume {
+		key = "9"
+	}
+	steps := (abs(target-p.volume) + 4) / 5
+	for range steps {
+		if err := p.sendKeyLocked(key); err != nil {
+			return p.volume, err
+		}
+	}
+	p.volume = target
+	return p.volume, nil
+}
+
+// ToggleMute toggles ffplay audio without changing the stored volume.
+func (p *Player) ToggleMute() (bool, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.cmd == nil || p.input == nil {
+		return p.muted, errors.New("nothing is playing")
+	}
+	if err := p.sendKeyLocked("m"); err != nil {
+		return p.muted, err
+	}
+	p.muted = !p.muted
+	return p.muted, nil
+}
+
+func (p *Player) sendKeyLocked(key string) error {
+	_, err := io.WriteString(p.input, key)
+	return err
+}
+
+func abs(value int) int {
+	if value < 0 {
+		return -value
+	}
+	return value
 }
 
 func (p *Player) Stop() {
@@ -98,4 +151,5 @@ func (p *Player) stopLocked() {
 	p.cmd = nil
 	p.input = nil
 	p.paused = false
+	p.muted = false
 }

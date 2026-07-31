@@ -46,12 +46,12 @@ func (c *Client) Mixes(ctx context.Context) ([]Track, error) {
 			ids := make([]int64, 0, len(playlist.Tracks))
 			for _, track := range playlist.Tracks {
 				if track.ID > 0 {
-					ids = append(ids, track.ID)
+					ids = append(ids, int64(track.ID))
 				}
 			}
 			tracks = append(tracks, Track{
 				Title: playlist.Title, Artist: "SoundCloud", URL: playlist.PermalinkURL,
-				Collection: true, TrackIDs: ids,
+				Collection: true, TrackIDs: ids, Personalized: true,
 			})
 			if len(tracks) >= c.limit {
 				return tracks, nil
@@ -134,6 +134,9 @@ func (a *apiClient) trackCollection(ctx context.Context, path string, limit int)
 }
 
 func (a *apiClient) tracksByIDs(ctx context.Context, ids []int64) ([]Track, error) {
+	if len(ids) == 0 {
+		return nil, errors.New("персональный микс не содержит треков; обновите HAR-сессию")
+	}
 	values := make([]string, 0, len(ids))
 	for _, id := range ids {
 		values = append(values, strconv.FormatInt(id, 10))
@@ -173,7 +176,7 @@ type mixedSelectionsResponse struct {
 				Title        string `json:"title"`
 				PermalinkURL string `json:"permalink_url"`
 				Tracks       []struct {
-					ID int64 `json:"id"`
+					ID jsonID `json:"id"`
 				} `json:"tracks"`
 			} `json:"collection"`
 		} `json:"items"`
@@ -187,6 +190,7 @@ type trackCollectionResponse struct {
 }
 
 type apiTrack struct {
+	ID            jsonID `json:"id"`
 	Title         string `json:"title"`
 	PermalinkURL  string `json:"permalink_url"`
 	Duration      int    `json:"duration"`
@@ -194,4 +198,28 @@ type apiTrack struct {
 	User          struct {
 		Username string `json:"username"`
 	} `json:"user"`
+}
+
+// jsonID accepts both numeric and quoted IDs used by different SoundCloud endpoints.
+type jsonID int64
+
+func (id *jsonID) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" || len(data) == 0 {
+		*id = 0
+		return nil
+	}
+	value := string(data)
+	if data[0] == '"' {
+		var quoted string
+		if err := json.Unmarshal(data, &quoted); err != nil {
+			return err
+		}
+		value = quoted
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid SoundCloud ID %q: %w", value, err)
+	}
+	*id = jsonID(parsed)
+	return nil
 }
