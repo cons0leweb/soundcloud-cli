@@ -75,7 +75,7 @@ func (p *Player) TogglePause() (bool, error) {
 	if p.cmd == nil || p.cmd.Process == nil || p.input == nil {
 		return false, errors.New("nothing is playing")
 	}
-	if err := p.sendKeyLocked("p"); err != nil {
+	if err := togglePause(p.cmd, p.input, p.paused); err != nil {
 		return p.paused, err
 	}
 	p.paused = !p.paused
