@@ -13,7 +13,7 @@ import (
 type catalog interface {
 	Search(context.Context, string) ([]soundcloud.Track, error)
 	Expand(context.Context, soundcloud.Track) ([]soundcloud.Track, error)
-	StreamURL(context.Context, string) (string, error)
+	StreamURL(context.Context, soundcloud.Track) (string, error)
 	Mixes(context.Context) ([]soundcloud.Track, error)
 	Likes(context.Context) ([]soundcloud.Track, error)
 	History(context.Context) ([]soundcloud.Track, error)
@@ -487,7 +487,7 @@ func startPlaybackCmd(c catalog, track soundcloud.Track, request int) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		streamURL, err := c.StreamURL(ctx, track.URL)
+		streamURL, err := c.StreamURL(ctx, track)
 		return streamResolvedMsg{request: request, streamURL: streamURL, err: err}
 	}
 }

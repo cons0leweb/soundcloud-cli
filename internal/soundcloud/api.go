@@ -119,6 +119,45 @@ func (a *apiClient) get(ctx context.Context, path string, query url.Values, targ
 	return nil
 }
 
+func (a *apiClient) resolveStream(ctx context.Context, endpoint, trackAuthorization string) (string, error) {
+	parsed, err := url.Parse(endpoint)
+	if err != nil || parsed.Scheme != "https" || parsed.Hostname() != "api-v2.soundcloud.com" {
+		return "", errors.New("SoundCloud returned an invalid media endpoint")
+	}
+	query := parsed.Query()
+	query.Set("client_id", a.credentials.clientID)
+	if trackAuthorization != "" {
+		query.Set("track_authorization", trackAuthorization)
+	}
+	parsed.RawQuery = query.Encode()
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
+	if err != nil {
+		return "", err
+	}
+	request.Header.Set("Authorization", a.credentials.authorization)
+	request.Header.Set("Accept", "application/json")
+	response, err := a.http.Do(request)
+	if err != nil {
+		return "", fmt.Errorf("SoundCloud stream request failed: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("SoundCloud stream endpoint returned %s", response.Status)
+	}
+	var payload struct {
+		URL string `json:"url"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		return "", fmt.Errorf("decode SoundCloud stream response: %w", err)
+	}
+	stream, err := url.Parse(payload.URL)
+	if err != nil || stream.Scheme != "https" || stream.Host == "" {
+		return "", errors.New("SoundCloud returned an invalid stream URL")
+	}
+	return payload.URL, nil
+}
+
 func (a *apiClient) trackCollection(ctx context.Context, path string, limit int) ([]Track, error) {
 	var response trackCollectionResponse
 	if err := a.get(ctx, path, url.Values{
@@ -161,6 +200,8 @@ func convertAPITracks(apiTracks []apiTrack) ([]Track, error) {
 		tracks = append(tracks, Track{
 			Title: track.Title, Artist: artist, URL: track.PermalinkURL,
 			Duration: track.Duration / 1000, Plays: track.PlaybackCount,
+			StreamEndpoint:     preferredTranscoding(track.Media.Transcodings),
+			TrackAuthorization: track.TrackAuthorization,
 		})
 	}
 	if len(tracks) == 0 {
@@ -190,14 +231,44 @@ type trackCollectionResponse struct {
 }
 
 type apiTrack struct {
-	ID            jsonID `json:"id"`
-	Title         string `json:"title"`
-	PermalinkURL  string `json:"permalink_url"`
-	Duration      int    `json:"duration"`
-	PlaybackCount int64  `json:"playback_count"`
-	User          struct {
+	ID                 jsonID `json:"id"`
+	Title              string `json:"title"`
+	PermalinkURL       string `json:"permalink_url"`
+	Duration           int    `json:"duration"`
+	PlaybackCount      int64  `json:"playback_count"`
+	TrackAuthorization string `json:"track_authorization"`
+	Media              struct {
+		Transcodings []apiTranscoding `json:"transcodings"`
+	} `json:"media"`
+	User struct {
 		Username string `json:"username"`
 	} `json:"user"`
+}
+
+type apiTranscoding struct {
+	URL    string `json:"url"`
+	Preset string `json:"preset"`
+	Format struct {
+		Protocol string `json:"protocol"`
+		MIMEType string `json:"mime_type"`
+	} `json:"format"`
+}
+
+func preferredTranscoding(transcodings []apiTranscoding) string {
+	for _, transcoding := range transcodings {
+		if transcoding.Format.Protocol == "progressive" && transcoding.URL != "" {
+			return transcoding.URL
+		}
+	}
+	for _, transcoding := range transcodings {
+		if transcoding.Format.Protocol == "hls" && strings.Contains(transcoding.Format.MIMEType, "mpeg") && transcoding.URL != "" {
+			return transcoding.URL
+		}
+	}
+	if len(transcodings) > 0 {
+		return transcodings[0].URL
+	}
+	return ""
 }
 
 // jsonID accepts both numeric and quoted IDs used by different SoundCloud endpoints.

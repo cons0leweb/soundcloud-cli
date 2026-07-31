@@ -48,3 +48,14 @@ func TestMixedSelectionAcceptsURNContainerID(t *testing.T) {
 		t.Fatalf("unexpected track IDs: %#v", tracks)
 	}
 }
+
+func TestPreferredTranscodingPrefersProgressive(t *testing.T) {
+	transcodings := []apiTranscoding{{URL: "https://api-v2.soundcloud.com/hls"}, {URL: "https://api-v2.soundcloud.com/progressive"}}
+	transcodings[0].Format.Protocol = "hls"
+	transcodings[0].Format.MIMEType = "audio/mpeg"
+	transcodings[1].Format.Protocol = "progressive"
+	transcodings[1].Format.MIMEType = "audio/mpeg"
+	if got := preferredTranscoding(transcodings); got != transcodings[1].URL {
+		t.Fatalf("preferred transcoding = %q, want progressive %q", got, transcodings[1].URL)
+	}
+}

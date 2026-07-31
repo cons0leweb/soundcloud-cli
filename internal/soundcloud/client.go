@@ -14,14 +14,16 @@ import (
 
 // Track is the small, UI-facing subset of SoundCloud metadata.
 type Track struct {
-	Title        string
-	Artist       string
-	URL          string
-	Duration     int
-	Plays        int64
-	Collection   bool
-	TrackIDs     []int64
-	Personalized bool
+	Title              string
+	Artist             string
+	URL                string
+	Duration           int
+	Plays              int64
+	Collection         bool
+	TrackIDs           []int64
+	Personalized       bool
+	StreamEndpoint     string
+	TrackAuthorization string
 }
 
 // Expand returns tracks from either an authenticated system mix or a public set.
@@ -63,14 +65,7 @@ func (c *Client) Search(ctx context.Context, query string) ([]Track, error) {
 	if err != nil {
 		return nil, err
 	}
-	args := c.withCookies(
-		"--dump-single-json",
-		"--flat-playlist",
-		"--playlist-end", strconv.Itoa(c.limit),
-		"--no-warnings",
-		"--no-call-home",
-		target,
-	)
+	args := c.searchArgs(target)
 	cmd := exec.CommandContext(ctx, c.binary, args...)
 	output, err := cmd.Output()
 	if err != nil {
@@ -110,20 +105,19 @@ func (c *Client) searchTarget(query string) (string, error) {
 	return "https://soundcloud.com/" + url.PathEscape(profile) + suffix, nil
 }
 
-// StreamURL resolves a public SoundCloud page to the media URL ffplay can read.
-func (c *Client) StreamURL(ctx context.Context, pageURL string) (string, error) {
-	if !isSoundCloudURL(pageURL) {
+// StreamURL resolves API metadata directly and uses yt-dlp for public pages.
+func (c *Client) StreamURL(ctx context.Context, track Track) (string, error) {
+	if track.StreamEndpoint != "" {
+		if err := c.requireAPI(); err != nil {
+			return "", err
+		}
+		return c.api.resolveStream(ctx, track.StreamEndpoint, track.TrackAuthorization)
+	}
+	if !isSoundCloudURL(track.URL) {
 		return "", errors.New("refusing to play a non-SoundCloud URL")
 	}
 
-	args := c.withCookies(
-		"--get-url",
-		"--format", "bestaudio/best",
-		"--no-playlist",
-		"--no-warnings",
-		"--no-call-home",
-		pageURL,
-	)
+	args := c.streamArgs(track.URL)
 	cmd := exec.CommandContext(ctx, c.binary, args...)
 	output, err := cmd.Output()
 	if err != nil {
@@ -141,6 +135,28 @@ func (c *Client) withCookies(args ...string) []string {
 		return args
 	}
 	return append([]string{"--cookies", c.cookies}, args...)
+}
+
+func (c *Client) searchArgs(target string) []string {
+	return c.withCookies(
+		"--ignore-config",
+		"--dump-single-json",
+		"--flat-playlist",
+		"--playlist-end", strconv.Itoa(c.limit),
+		"--no-warnings",
+		target,
+	)
+}
+
+func (c *Client) streamArgs(pageURL string) []string {
+	return c.withCookies(
+		"--ignore-config",
+		"--get-url",
+		"--format", "bestaudio/best",
+		"--no-playlist",
+		"--no-warnings",
+		pageURL,
+	)
 }
 
 type searchResponse struct {

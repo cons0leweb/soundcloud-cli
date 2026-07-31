@@ -1,6 +1,9 @@
 package soundcloud
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestParseSearch(t *testing.T) {
 	data := []byte(`{
@@ -91,6 +94,24 @@ func TestSearchTarget(t *testing.T) {
 		}
 		if got != want {
 			t.Errorf("searchTarget(%q) = %q, want %q", query, got, want)
+		}
+	}
+}
+
+func TestYTDLPArgsDoNotUseRemovedOptions(t *testing.T) {
+	client := &Client{binary: "yt-dlp", cookies: "cookies.txt", limit: 20}
+	for name, args := range map[string][]string{
+		"search": client.searchArgs("scsearch20:test"),
+		"stream": client.streamArgs("https://soundcloud.com/user/track"),
+	} {
+		if slices.Contains(args, "--no-call-home") {
+			t.Fatalf("%s args contain removed --no-call-home: %v", name, args)
+		}
+		if !slices.Contains(args, "--cookies") {
+			t.Fatalf("%s args lost cookie support: %v", name, args)
+		}
+		if !slices.Contains(args, "--ignore-config") {
+			t.Fatalf("%s args do not isolate deprecated user config: %v", name, args)
 		}
 	}
 }
