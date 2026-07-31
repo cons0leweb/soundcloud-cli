@@ -51,7 +51,7 @@ func (m Model) View() string {
 		out.WriteString(m.renderTracks(contentWidth))
 	}
 
-	footerHeight := 9
+	footerHeight := m.footerHeight()
 	used := strings.Count(out.String(), "\n") + footerHeight
 	if innerHeight > used {
 		out.WriteString(strings.Repeat("\n", innerHeight-used))
@@ -138,7 +138,7 @@ func (m Model) renderEmptyState(width int) string {
 }
 
 func (m Model) renderTracks(width int) string {
-	available := max(3, m.height-18)
+	available := max(3, m.height-m.footerHeight()-9)
 	start := 0
 	if m.cursor >= available {
 		start = m.cursor - available + 1
@@ -211,11 +211,6 @@ func (m Model) renderPlayer(width int) string {
 	}
 	trackLine := fmt.Sprintf("%s %s  %s · %s", stateIcon, state, m.currentTrack.Title, m.currentTrack.Artist)
 	elapsed := int(m.elapsed().Seconds())
-	waveWidth := max(8, width)
-	wave := buildWaveform(m.currentTrack, waveWidth, m.waveFrame)
-	head := waveformHead(waveWidth, elapsed, m.currentTrack.Duration)
-	waveTop := renderWaveformRow(wave.top, head)
-	waveBottom := renderWaveformRow(wave.bottom, head)
 	timeText := formatDuration(elapsed) + " / " + formatDuration(m.currentTrack.Duration)
 	position, total := m.queue.position()
 	queueText := fmt.Sprintf("ОЧЕРЕДЬ %d/%d", position, total)
@@ -234,7 +229,34 @@ func (m Model) renderPlayer(width int) string {
 	if m.muted {
 		modes = "MUTED   " + modes
 	}
-	return separator + "\n" + playing.Render(truncate(trackLine, width)) + "\n" + waveTop + "\n" + waveBottom + "\n" + truncate(timeLine, width) + "\n" + mutedText.Render(truncate(modes, width))
+	player := separator + "\n" + playing.Render(truncate(trackLine, width)) + "\n"
+	if m.waveformVisible {
+		waveWidth := max(8, width)
+		wave := buildWaveform(m.currentTrack, waveWidth, m.waveFrame)
+		head := waveformHead(waveWidth, elapsed, m.currentTrack.Duration)
+		player += renderWaveformRow(wave.top, head) + "\n" + renderWaveformRow(wave.bottom, head) + "\n" + truncate(timeLine, width)
+	} else {
+		progressWidth := max(8, min(34, width-lipgloss.Width(timeText+queueText)-4))
+		progress := renderProgress(progressWidth, elapsed, m.currentTrack.Duration)
+		gap := strings.Repeat(" ", max(1, width-lipgloss.Width(progress+timeText+queueText)-2))
+		player += progress + "  " + timeText + gap + queueText
+	}
+	return player + "\n" + mutedText.Render(truncate(modes, width))
+}
+
+func (m Model) footerHeight() int {
+	if m.waveformVisible {
+		return 9
+	}
+	return 7
+}
+
+func renderProgress(width, elapsed, duration int) string {
+	filled := 0
+	if duration > 0 {
+		filled = min(width, max(0, elapsed*width/duration))
+	}
+	return playing.Render(strings.Repeat("━", filled)) + lipgloss.NewStyle().Foreground(panel).Render(strings.Repeat("─", width-filled))
 }
 
 func waveformHead(width, elapsed, duration int) int {
@@ -280,7 +302,7 @@ func (m Model) renderStatusAndHelp(width int) string {
 		status = mutedText.Render(truncate(status, width))
 	}
 
-	help := "Enter играть  a радио ∞  Space пауза  n/p трек  +/- громкость  x mute  z shuffle  r repeat  ?"
+	help := "Enter играть  a радио ∞  Space пауза  n/p трек  w волна  +/- громкость  x mute  ?"
 	if m.searchFocus {
 		help = "Enter искать  Esc к списку  Ctrl+C выход"
 	}
@@ -295,7 +317,7 @@ func (m Model) renderHelp(width int) string {
 		"Enter      открыть        +/-    громкость        n/p  след/пред",
 		"b          назад          x      mute             z    shuffle",
 		"/          поиск          s      остановить       r    repeat",
-		"m/l/h      разделы        q      выход",
+		"m/l/h      разделы        w      волна on/off      q    выход",
 	}
 	lines := []string{title, ""}
 	for _, line := range columns {

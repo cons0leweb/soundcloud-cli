@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-07-31
+
+### Fixed
+
+- Fresh HAR archives no longer require a captured `track_likes` request before authenticated streaming can work.
+- Stream resolution retries every advertised SoundCloud transcoding and resolves search results by numeric track ID before falling back to `yt-dlp`.
+- Track radio automatically skips unavailable recommendations instead of stopping on HTTP 404.
+
+### Added
+
+- `w` toggles the animated waveform and restores a compact progress bar when hidden.
+
 ## [0.3.0] - 2026-07-31
 
 ### Added
@@ -56,7 +68,8 @@ All notable changes to this project are documented here. The format follows [Kee
 - Automatic local cookie and HAR discovery with a public mode fallback.
 - Linux, macOS, and Windows release archives.
 
-[Unreleased]: https://github.com/cons0leweb/soundcloud-cli/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/cons0leweb/soundcloud-cli/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/cons0leweb/soundcloud-cli/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/cons0leweb/soundcloud-cli/compare/v0.2.3...v0.3.0
 [0.2.3]: https://github.com/cons0leweb/soundcloud-cli/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/cons0leweb/soundcloud-cli/compare/v0.2.1...v0.2.2

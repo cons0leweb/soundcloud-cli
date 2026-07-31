@@ -80,9 +80,6 @@ func loadCredentials(explicitPath string) (apiCredentials, error) {
 	if credentials.clientID == "" || credentials.authorization == "" {
 		return apiCredentials{}, errors.New("HAR does not contain an authenticated SoundCloud API request")
 	}
-	if credentials.userID == "" {
-		return apiCredentials{}, errors.New("HAR does not contain the current SoundCloud user ID")
-	}
 	return credentials, nil
 }
 

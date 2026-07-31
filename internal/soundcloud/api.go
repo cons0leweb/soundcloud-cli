@@ -68,7 +68,11 @@ func (c *Client) Likes(ctx context.Context) ([]Track, error) {
 	if err := c.requireAPI(); err != nil {
 		return nil, err
 	}
-	return c.api.trackCollection(ctx, "/users/"+url.PathEscape(c.api.credentials.userID)+"/track_likes", c.limit)
+	path := "/me/track_likes"
+	if c.api.credentials.userID != "" {
+		path = "/users/" + url.PathEscape(c.api.credentials.userID) + "/track_likes"
+	}
+	return c.api.trackCollection(ctx, path, c.limit)
 }
 
 func (c *Client) History(ctx context.Context) ([]Track, error) {
@@ -87,8 +91,8 @@ func (c *Client) Station(ctx context.Context, seed Track) ([]Track, error) {
 		return nil, errors.New("cannot start radio from a non-SoundCloud track")
 	}
 
-	var resolved apiTrack
-	if err := c.api.get(ctx, "/resolve", url.Values{"url": {seed.URL}}, &resolved); err != nil {
+	resolved, err := c.api.resolveTrack(ctx, seed)
+	if err != nil {
 		return nil, fmt.Errorf("resolve radio seed: %w", err)
 	}
 	if resolved.ID <= 0 {
@@ -185,16 +189,40 @@ func (a *apiClient) resolveStream(ctx context.Context, endpoint, trackAuthorizat
 	return payload.URL, nil
 }
 
-func (a *apiClient) resolveTrackStream(ctx context.Context, pageURL string) (string, error) {
+func (a *apiClient) resolveTrack(ctx context.Context, seed Track) (apiTrack, error) {
 	var track apiTrack
-	if err := a.get(ctx, "/resolve", url.Values{"url": {pageURL}}, &track); err != nil {
+	if seed.ID > 0 {
+		if err := a.get(ctx, "/tracks/"+strconv.FormatInt(seed.ID, 10), url.Values{}, &track); err == nil {
+			return track, nil
+		}
+	}
+	if err := a.get(ctx, "/resolve", url.Values{"url": {seed.URL}}, &track); err != nil {
+		return apiTrack{}, err
+	}
+	return track, nil
+}
+
+func (a *apiClient) resolveTrackStream(ctx context.Context, seed Track) (string, error) {
+	track, err := a.resolveTrack(ctx, seed)
+	if err != nil {
 		return "", err
 	}
-	endpoint := preferredTranscoding(track.Media.Transcodings)
-	if endpoint == "" {
+	return a.resolveAnyStream(ctx, transcodingEndpoints(track.Media.Transcodings), track.TrackAuthorization)
+}
+
+func (a *apiClient) resolveAnyStream(ctx context.Context, endpoints []string, trackAuthorization string) (string, error) {
+	if len(endpoints) == 0 {
 		return "", errors.New("SoundCloud track has no playable transcodings")
 	}
-	return a.resolveStream(ctx, endpoint, track.TrackAuthorization)
+	var lastErr error
+	for _, endpoint := range endpoints {
+		streamURL, err := a.resolveStream(ctx, endpoint, trackAuthorization)
+		if err == nil {
+			return streamURL, nil
+		}
+		lastErr = err
+	}
+	return "", fmt.Errorf("all SoundCloud transcodings failed: %w", lastErr)
 }
 
 func (a *apiClient) trackCollection(ctx context.Context, path string, limit int) ([]Track, error) {
@@ -237,9 +265,10 @@ func convertAPITracks(apiTracks []apiTrack) ([]Track, error) {
 			artist = "Unknown artist"
 		}
 		tracks = append(tracks, Track{
-			Title: track.Title, Artist: artist, URL: track.PermalinkURL,
+			ID: int64(track.ID), Title: track.Title, Artist: artist, URL: track.PermalinkURL,
 			Duration: track.Duration / 1000, Plays: track.PlaybackCount,
 			StreamEndpoint:     preferredTranscoding(track.Media.Transcodings),
+			StreamEndpoints:    transcodingEndpoints(track.Media.Transcodings),
 			TrackAuthorization: track.TrackAuthorization,
 		})
 	}
@@ -312,6 +341,21 @@ func preferredTranscoding(transcodings []apiTranscoding) string {
 		return transcodings[0].URL
 	}
 	return ""
+}
+
+func transcodingEndpoints(transcodings []apiTranscoding) []string {
+	preferred := preferredTranscoding(transcodings)
+	endpoints := make([]string, 0, len(transcodings))
+	if preferred != "" {
+		endpoints = append(endpoints, preferred)
+	}
+	for _, transcoding := range transcodings {
+		if transcoding.URL == "" || transcoding.URL == preferred {
+			continue
+		}
+		endpoints = append(endpoints, transcoding.URL)
+	}
+	return endpoints
 }
 
 // jsonID accepts both numeric and quoted IDs used by different SoundCloud endpoints.

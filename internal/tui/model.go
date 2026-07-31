@@ -44,22 +44,23 @@ type Model struct {
 	width  int
 	height int
 
-	query          []rune
-	searchFocus    bool
-	searching      bool
-	tracks         []soundcloud.Track
-	cursor         int
-	errorText      string
-	statusText     string
-	spinner        int
-	waveFrame      uint64
-	catalogRequest int
-	activeView     string
-	helpVisible    bool
-	radioMode      bool
-	radioLoading   bool
-	radioResume    bool
-	radioRequest   int
+	query           []rune
+	searchFocus     bool
+	searching       bool
+	tracks          []soundcloud.Track
+	cursor          int
+	errorText       string
+	statusText      string
+	spinner         int
+	waveFrame       uint64
+	catalogRequest  int
+	activeView      string
+	helpVisible     bool
+	waveformVisible bool
+	radioMode       bool
+	radioLoading    bool
+	radioResume     bool
+	radioRequest    int
 
 	playback     playbackState
 	currentTrack soundcloud.Track
@@ -83,13 +84,14 @@ type viewSnapshot struct {
 
 func New(catalog catalog, player audioPlayer) Model {
 	return Model{
-		catalog:     catalog,
-		player:      player,
-		searchFocus: true,
-		queue:       newPlaybackQueue(),
-		volume:      80,
-		activeView:  "search",
-		statusText:  "Введите запрос и нажмите Enter",
+		catalog:         catalog,
+		player:          player,
+		searchFocus:     true,
+		queue:           newPlaybackQueue(),
+		volume:          80,
+		activeView:      "search",
+		waveformVisible: true,
+		statusText:      "Введите запрос и нажмите Enter",
 	}
 }
 
@@ -189,6 +191,13 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.err != nil {
+			if m.radioMode {
+				if next := m.queue.next(false); next >= 0 {
+					m.errorText = ""
+					m.statusText = "Недоступный трек пропущен · радио продолжается"
+					return m.beginQueuedPlayback(next)
+				}
+			}
 			m.playback = playbackStopped
 			m.errorText = msg.err.Error()
 			m.statusText = "Не удалось начать воспроизведение"
@@ -375,6 +384,9 @@ func (m Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		m.queue.cycleRepeat()
 		m.statusText = "Повтор: " + m.repeatLabel()
+	case "w":
+		m.waveformVisible = !m.waveformVisible
+		m.statusText = map[bool]string{true: "Визуальная волна включена", false: "Визуальная волна скрыта"}[m.waveformVisible]
 	case "+", "=":
 		return m.adjustVolume(5)
 	case "-":

@@ -59,3 +59,13 @@ func TestPreferredTranscodingPrefersProgressive(t *testing.T) {
 		t.Fatalf("preferred transcoding = %q, want progressive %q", got, transcodings[1].URL)
 	}
 }
+
+func TestTranscodingEndpointsKeepFallbacks(t *testing.T) {
+	transcodings := []apiTranscoding{{URL: "https://api-v2.soundcloud.com/hls"}, {URL: "https://api-v2.soundcloud.com/progressive"}}
+	transcodings[0].Format.Protocol = "hls"
+	transcodings[1].Format.Protocol = "progressive"
+	got := transcodingEndpoints(transcodings)
+	if len(got) != 2 || got[0] != transcodings[1].URL || got[1] != transcodings[0].URL {
+		t.Fatalf("transcoding fallback order = %#v", got)
+	}
+}

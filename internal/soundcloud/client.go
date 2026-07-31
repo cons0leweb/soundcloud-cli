@@ -14,6 +14,7 @@ import (
 
 // Track is the small, UI-facing subset of SoundCloud metadata.
 type Track struct {
+	ID                 int64
 	Title              string
 	Artist             string
 	URL                string
@@ -23,6 +24,7 @@ type Track struct {
 	TrackIDs           []int64
 	Personalized       bool
 	StreamEndpoint     string
+	StreamEndpoints    []string
 	TrackAuthorization string
 }
 
@@ -107,17 +109,20 @@ func (c *Client) searchTarget(query string) (string, error) {
 
 // StreamURL resolves API metadata directly and uses yt-dlp for public pages.
 func (c *Client) StreamURL(ctx context.Context, track Track) (string, error) {
-	if track.StreamEndpoint != "" {
-		if err := c.requireAPI(); err != nil {
-			return "", err
-		}
-		return c.api.resolveStream(ctx, track.StreamEndpoint, track.TrackAuthorization)
-	}
 	if !isSoundCloudURL(track.URL) {
 		return "", errors.New("refusing to play a non-SoundCloud URL")
 	}
 	if c.requireAPI() == nil {
-		if streamURL, err := c.api.resolveTrackStream(ctx, track.URL); err == nil {
+		endpoints := track.StreamEndpoints
+		if len(endpoints) == 0 && track.StreamEndpoint != "" {
+			endpoints = []string{track.StreamEndpoint}
+		}
+		if len(endpoints) > 0 {
+			if streamURL, err := c.api.resolveAnyStream(ctx, endpoints, track.TrackAuthorization); err == nil {
+				return streamURL, nil
+			}
+		}
+		if streamURL, err := c.api.resolveTrackStream(ctx, track); err == nil {
 			return streamURL, nil
 		}
 	}
@@ -190,12 +195,13 @@ type searchResponse struct {
 }
 
 type searchEntry struct {
-	Title      string  `json:"title"`
-	Uploader   string  `json:"uploader"`
-	URL        string  `json:"url"`
-	WebpageURL string  `json:"webpage_url"`
-	Duration   float64 `json:"duration"`
-	ViewCount  int64   `json:"view_count"`
+	ID         json.RawMessage `json:"id"`
+	Title      string          `json:"title"`
+	Uploader   string          `json:"uploader"`
+	URL        string          `json:"url"`
+	WebpageURL string          `json:"webpage_url"`
+	Duration   float64         `json:"duration"`
+	ViewCount  int64           `json:"view_count"`
 }
 
 func parseSearch(data []byte) ([]Track, error) {
@@ -221,6 +227,7 @@ func parseSearch(data []byte) ([]Track, error) {
 			artist = "Unknown artist"
 		}
 		tracks = append(tracks, Track{
+			ID:         numericSearchID(entry.ID),
 			Title:      strings.TrimSpace(entry.Title),
 			Artist:     artist,
 			URL:        pageURL,
@@ -230,6 +237,14 @@ func parseSearch(data []byte) ([]Track, error) {
 		})
 	}
 	return tracks, nil
+}
+
+func numericSearchID(raw json.RawMessage) int64 {
+	var id jsonID
+	if len(raw) == 0 || json.Unmarshal(raw, &id) != nil {
+		return 0
+	}
+	return int64(id)
 }
 
 func isCollectionURL(raw string) bool {

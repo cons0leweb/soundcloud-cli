@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -70,5 +71,42 @@ func TestStopCancelsPendingRadioResume(t *testing.T) {
 	model.stopPlayback("Stopped")
 	if model.radioLoading || model.radioResume || model.radioRequest != 5 || model.playback != playbackStopped {
 		t.Fatalf("pending radio was not cancelled: loading=%v resume=%v request=%d state=%d", model.radioLoading, model.radioResume, model.radioRequest, model.playback)
+	}
+}
+
+func TestWaveformToggleIsReversible(t *testing.T) {
+	model := New(nil, testPlayer{})
+	model.searchFocus = false
+	if !model.waveformVisible {
+		t.Fatal("waveform should be visible by default")
+	}
+	updated, _ := model.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'w'}})
+	hidden := updated.(Model)
+	if hidden.waveformVisible || hidden.statusText != "Визуальная волна скрыта" {
+		t.Fatalf("waveform was not hidden: visible=%v status=%q", hidden.waveformVisible, hidden.statusText)
+	}
+	updated, _ = hidden.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'w'}})
+	if !updated.(Model).waveformVisible {
+		t.Fatal("waveform was not restored")
+	}
+}
+
+func TestRadioSkipsUnavailableTrack(t *testing.T) {
+	model := New(nil, testPlayer{})
+	model.searchFocus = false
+	model.radioMode = true
+	model.playRequest = 9
+	model.queue.tracks = []soundcloud.Track{
+		{Title: "Unavailable", URL: "https://soundcloud.com/a/unavailable"},
+		{Title: "Playable", URL: "https://soundcloud.com/b/playable"},
+	}
+	model.queue.index = 0
+	model.currentTrack = model.queue.tracks[0]
+	model.hasCurrent = true
+
+	updated, cmd := model.Update(streamResolvedMsg{request: 9, err: errors.New("HTTP 404")})
+	got := updated.(Model)
+	if cmd == nil || got.currentTrack.URL != model.queue.tracks[1].URL || got.errorText != "" {
+		t.Fatalf("radio did not skip unavailable track: current=%q error=%q", got.currentTrack.URL, got.errorText)
 	}
 }

@@ -1,6 +1,9 @@
 package tui
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestFormatDuration(t *testing.T) {
 	tests := map[int]string{
@@ -22,5 +25,18 @@ func TestTruncate(t *testing.T) {
 	}
 	if got := truncate("ok", 5); got != "ok" {
 		t.Fatalf("truncate short string = %q", got)
+	}
+}
+
+func TestCompactPlayerUsesProgressBarWhenWaveformHidden(t *testing.T) {
+	model := New(nil, nil)
+	model.width = 80
+	model.hasCurrent = true
+	model.currentTrack.Title = "Track"
+	model.currentTrack.Duration = 120
+	model.waveformVisible = false
+	player := model.renderPlayer(80)
+	if strings.Count(player, "\n") != 3 || !strings.Contains(player, "─") {
+		t.Fatalf("unexpected compact player: %q", player)
 	}
 }

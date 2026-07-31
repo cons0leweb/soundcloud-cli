@@ -9,6 +9,7 @@ func TestParseSearch(t *testing.T) {
 	data := []byte(`{
   "entries": [
     {
+	  "id": "741073894",
       "title": "Night Drive",
       "uploader": "DJ Test",
       "webpage_url": "https://soundcloud.com/dj-test/night-drive",
@@ -40,8 +41,17 @@ func TestParseSearch(t *testing.T) {
 	if tracks[0].Duration != 184 || tracks[0].Plays != 12500 {
 		t.Fatalf("unexpected numeric metadata: %#v", tracks[0])
 	}
+	if tracks[0].ID != 741073894 {
+		t.Fatalf("numeric track ID was not preserved: %#v", tracks[0])
+	}
 	if tracks[1].Artist != "Unknown artist" {
 		t.Fatalf("missing artist was not normalized: %#v", tracks[1])
+	}
+}
+
+func TestNumericSearchIDIgnoresNonNumericCollectionIDs(t *testing.T) {
+	if got := numericSearchID([]byte(`"soundcloud:system-playlists:test"`)); got != 0 {
+		t.Fatalf("non-numeric ID = %d, want 0", got)
 	}
 }
 
