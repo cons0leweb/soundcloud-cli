@@ -116,8 +116,29 @@ func (c *Client) StreamURL(ctx context.Context, track Track) (string, error) {
 	if !isSoundCloudURL(track.URL) {
 		return "", errors.New("refusing to play a non-SoundCloud URL")
 	}
+	if c.requireAPI() == nil {
+		if streamURL, err := c.api.resolveTrackStream(ctx, track.URL); err == nil {
+			return streamURL, nil
+		}
+	}
 
-	args := c.streamArgs(track.URL)
+	streamURL, err := c.streamWithYTDLP(ctx, track.URL, true)
+	if err == nil {
+		return streamURL, nil
+	}
+	if c.cookies != "" {
+		if publicURL, publicErr := c.streamWithYTDLP(ctx, track.URL, false); publicErr == nil {
+			return publicURL, nil
+		}
+	}
+	return "", fmt.Errorf("трек недоступен через SoundCloud API и yt-dlp: %w", err)
+}
+
+func (c *Client) streamWithYTDLP(ctx context.Context, pageURL string, withCookies bool) (string, error) {
+	args := c.streamArgs(pageURL)
+	if !withCookies {
+		args = c.streamArgsWithoutCookies(pageURL)
+	}
 	cmd := exec.CommandContext(ctx, c.binary, args...)
 	output, err := cmd.Output()
 	if err != nil {
@@ -149,14 +170,18 @@ func (c *Client) searchArgs(target string) []string {
 }
 
 func (c *Client) streamArgs(pageURL string) []string {
-	return c.withCookies(
+	return c.withCookies(c.streamArgsWithoutCookies(pageURL)...)
+}
+
+func (c *Client) streamArgsWithoutCookies(pageURL string) []string {
+	return []string{
 		"--ignore-config",
 		"--get-url",
 		"--format", "bestaudio/best",
 		"--no-playlist",
 		"--no-warnings",
 		pageURL,
-	)
+	}
 }
 
 type searchResponse struct {

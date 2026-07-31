@@ -54,8 +54,8 @@ VOL 85% [▪▪▪▪▪▪▪▪▪·]   SHUFFLE OFF   REPEAT ВЫКЛЮЧЕН
 Linux x86_64:
 
 ```bash
-curl -LO https://github.com/cons0leweb/soundcloud-cli/releases/download/v0.2.2/soundcloud_0.2.2_Linux_x86_64.tar.gz
-tar -xzf soundcloud_0.2.2_Linux_x86_64.tar.gz
+curl -LO https://github.com/cons0leweb/soundcloud-cli/releases/download/v0.2.3/soundcloud_0.2.3_Linux_x86_64.tar.gz
+tar -xzf soundcloud_0.2.3_Linux_x86_64.tar.gz
 install -Dm755 soundcloud ~/.local/bin/soundcloud
 ```
 
@@ -63,7 +63,7 @@ install -Dm755 soundcloud ~/.local/bin/soundcloud
 
 ```bash
 soundcloud --version
-# soundcloud 0.2.2
+# soundcloud 0.2.3
 ```
 
 ### Из исходников

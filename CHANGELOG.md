@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-07-31
+
+### Fixed
+
+- Search input now preserves spaces between words.
+- Public search results now resolve through the SoundCloud API first, with cookie-free `yt-dlp` retry as a final fallback.
+
 ## [0.2.2] - 2026-07-31
 
 ### Fixed
@@ -42,7 +49,8 @@ All notable changes to this project are documented here. The format follows [Kee
 - Automatic local cookie and HAR discovery with a public mode fallback.
 - Linux, macOS, and Windows release archives.
 
-[Unreleased]: https://github.com/cons0leweb/soundcloud-cli/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/cons0leweb/soundcloud-cli/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/cons0leweb/soundcloud-cli/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/cons0leweb/soundcloud-cli/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/cons0leweb/soundcloud-cli/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/cons0leweb/soundcloud-cli/compare/v0.1.0...v0.2.0

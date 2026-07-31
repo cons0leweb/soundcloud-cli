@@ -114,4 +114,8 @@ func TestYTDLPArgsDoNotUseRemovedOptions(t *testing.T) {
 			t.Fatalf("%s args do not isolate deprecated user config: %v", name, args)
 		}
 	}
+	publicArgs := client.streamArgsWithoutCookies("https://soundcloud.com/user/track")
+	if slices.Contains(publicArgs, "--cookies") || slices.Contains(publicArgs, "cookies.txt") {
+		t.Fatalf("cookie-free retry contains cookies: %v", publicArgs)
+	}
 }

@@ -210,6 +210,8 @@ func (m Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if len(m.query) > 0 {
 				m.query = m.query[:len(m.query)-1]
 			}
+		case tea.KeySpace:
+			m.query = append(m.query, ' ')
 		case tea.KeyDown:
 			if len(m.tracks) > 0 {
 				m.searchFocus = false

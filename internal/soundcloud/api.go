@@ -158,6 +158,18 @@ func (a *apiClient) resolveStream(ctx context.Context, endpoint, trackAuthorizat
 	return payload.URL, nil
 }
 
+func (a *apiClient) resolveTrackStream(ctx context.Context, pageURL string) (string, error) {
+	var track apiTrack
+	if err := a.get(ctx, "/resolve", url.Values{"url": {pageURL}}, &track); err != nil {
+		return "", err
+	}
+	endpoint := preferredTranscoding(track.Media.Transcodings)
+	if endpoint == "" {
+		return "", errors.New("SoundCloud track has no playable transcodings")
+	}
+	return a.resolveStream(ctx, endpoint, track.TrackAuthorization)
+}
+
 func (a *apiClient) trackCollection(ctx context.Context, path string, limit int) ([]Track, error) {
 	var response trackCollectionResponse
 	if err := a.get(ctx, path, url.Values{
