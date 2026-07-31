@@ -48,6 +48,32 @@ func (q *playbackQueue) selectIndex(index int) (soundcloud.Track, bool) {
 	return q.tracks[index], true
 }
 
+func (q *playbackQueue) appendUnique(source []soundcloud.Track) int {
+	seen := make(map[string]bool, len(q.tracks))
+	for _, track := range q.tracks {
+		seen[track.URL] = true
+	}
+	first := -1
+	for _, track := range source {
+		if track.Collection || track.URL == "" || seen[track.URL] {
+			continue
+		}
+		seen[track.URL] = true
+		q.tracks = append(q.tracks, track)
+		if first < 0 {
+			first = len(q.tracks) - 1
+		}
+	}
+	return first
+}
+
+func (q playbackQueue) remaining() int {
+	if q.index < 0 {
+		return len(q.tracks)
+	}
+	return max(0, len(q.tracks)-q.index-1)
+}
+
 func (q *playbackQueue) next(manual bool) int {
 	if len(q.tracks) == 0 {
 		return -1

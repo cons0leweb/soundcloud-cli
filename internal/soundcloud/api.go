@@ -78,6 +78,33 @@ func (c *Client) History(ctx context.Context) ([]Track, error) {
 	return c.api.trackCollection(ctx, "/me/play-history/tracks", c.limit)
 }
 
+// Station returns SoundCloud's related-track recommendations for a seed track.
+func (c *Client) Station(ctx context.Context, seed Track) ([]Track, error) {
+	if err := c.requireAPI(); err != nil {
+		return nil, err
+	}
+	if !isSoundCloudURL(seed.URL) {
+		return nil, errors.New("cannot start radio from a non-SoundCloud track")
+	}
+
+	var resolved apiTrack
+	if err := c.api.get(ctx, "/resolve", url.Values{"url": {seed.URL}}, &resolved); err != nil {
+		return nil, fmt.Errorf("resolve radio seed: %w", err)
+	}
+	if resolved.ID <= 0 {
+		return nil, errors.New("SoundCloud did not return a track ID for radio")
+	}
+
+	var response relatedTracksResponse
+	path := "/tracks/" + strconv.FormatInt(int64(resolved.ID), 10) + "/related"
+	if err := c.api.get(ctx, path, url.Values{
+		"limit": {strconv.Itoa(c.limit)}, "linked_partitioning": {"1"},
+	}, &response); err != nil {
+		return nil, fmt.Errorf("load track radio: %w", err)
+	}
+	return convertAPITracks(response.Collection)
+}
+
 func (c *Client) requireAPI() error {
 	c.apiOnce.Do(func() {
 		c.api, c.apiErr = newAPIClient(c.harFile)
@@ -240,6 +267,10 @@ type trackCollectionResponse struct {
 	Collection []struct {
 		Track apiTrack `json:"track"`
 	} `json:"collection"`
+}
+
+type relatedTracksResponse struct {
+	Collection []apiTrack `json:"collection"`
 }
 
 type apiTrack struct {

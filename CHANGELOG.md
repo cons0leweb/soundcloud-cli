@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-31
+
+### Added
+
+- Animated infinite SoundCloud-style waveform with deterministic per-track shape, progress coloring, and pause-aware motion.
+- Endless track radio powered by SoundCloud recommendations, with automatic queue refills.
+
 ## [0.2.3] - 2026-07-31
 
 ### Fixed
@@ -49,7 +56,8 @@ All notable changes to this project are documented here. The format follows [Kee
 - Automatic local cookie and HAR discovery with a public mode fallback.
 - Linux, macOS, and Windows release archives.
 
-[Unreleased]: https://github.com/cons0leweb/soundcloud-cli/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/cons0leweb/soundcloud-cli/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/cons0leweb/soundcloud-cli/compare/v0.2.3...v0.3.0
 [0.2.3]: https://github.com/cons0leweb/soundcloud-cli/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/cons0leweb/soundcloud-cli/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/cons0leweb/soundcloud-cli/compare/v0.2.0...v0.2.1

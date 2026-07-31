@@ -17,6 +17,7 @@ type catalog interface {
 	Mixes(context.Context) ([]soundcloud.Track, error)
 	Likes(context.Context) ([]soundcloud.Track, error)
 	History(context.Context) ([]soundcloud.Track, error)
+	Station(context.Context, soundcloud.Track) ([]soundcloud.Track, error)
 }
 
 type audioPlayer interface {
@@ -51,9 +52,14 @@ type Model struct {
 	errorText      string
 	statusText     string
 	spinner        int
+	waveFrame      uint64
 	catalogRequest int
 	activeView     string
 	helpVisible    bool
+	radioMode      bool
+	radioLoading   bool
+	radioResume    bool
+	radioRequest   int
 
 	playback     playbackState
 	currentTrack soundcloud.Track
@@ -98,6 +104,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tickMsg:
 		m.spinner = (m.spinner + 1) % len(spinnerFrames)
+		if m.playback == playbackPlaying {
+			m.waveFrame++
+		}
 		return m, tickCmd()
 	case searchResultMsg:
 		if msg.request != m.catalogRequest {
@@ -128,6 +137,52 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.searchFocus = false
 		m.errorText = ""
 		m.statusText = fmt.Sprintf("Найдено треков: %d", len(msg.tracks))
+		return m, nil
+	case stationResultMsg:
+		if msg.request != m.radioRequest {
+			return m, nil
+		}
+		m.radioLoading = false
+		if msg.err != nil {
+			resume := m.radioResume
+			m.radioResume = false
+			if msg.initial {
+				m.radioMode = false
+			}
+			if resume {
+				m.playback = playbackStopped
+			}
+			m.errorText = msg.err.Error()
+			m.statusText = "Не удалось продолжить радио"
+			return m, nil
+		}
+		if msg.initial {
+			m.queue = newPlaybackQueue()
+			m.queue.appendUnique(append([]soundcloud.Track{msg.seed}, msg.tracks...))
+			m.queue.repeat = repeatOff
+			m.queue.shuffle = false
+			m.tracks = append([]soundcloud.Track(nil), m.queue.tracks...)
+			m.query = []rune("Радио: " + msg.seed.Title)
+			m.activeView = "radio"
+			m.history = nil
+			m.cursor = 0
+			m.radioMode = true
+			m.errorText = ""
+			m.statusText = fmt.Sprintf("Радио готово · %d треков", len(m.tracks))
+			return m.beginQueuedPlayback(0)
+		}
+		resume := msg.autoPlay || m.radioResume
+		m.radioResume = false
+		first := m.queue.appendUnique(msg.tracks)
+		m.tracks = append([]soundcloud.Track(nil), m.queue.tracks...)
+		if first < 0 {
+			m.statusText = "SoundCloud не нашёл новых треков для радио"
+			return m, nil
+		}
+		m.statusText = fmt.Sprintf("Радио пополнено · ещё %d треков", len(m.queue.tracks)-first)
+		if resume {
+			return m.beginQueuedPlayback(first)
+		}
 		return m, nil
 	case streamResolvedMsg:
 		if msg.request != m.playRequest {
@@ -165,6 +220,15 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if next := m.queue.next(false); next >= 0 {
 			return m.beginQueuedPlayback(next)
+		}
+		if m.radioMode {
+			m.playback = playbackLoading
+			if m.radioLoading {
+				m.radioResume = true
+				m.statusText = "Жду продолжение радио"
+				return m, nil
+			}
+			return m.refillRadio(m.currentTrack, true)
 		}
 		m.playback = playbackStopped
 		m.statusText = "Очередь завершена"
@@ -248,6 +312,11 @@ func (m Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.browseCollection(m.cursor)
 		}
 		return m.beginPlayback(m.cursor)
+	case "a":
+		if m.cursor < 0 || m.cursor >= len(m.tracks) || m.tracks[m.cursor].Collection {
+			return m, nil
+		}
+		return m.startRadio(m.tracks[m.cursor])
 	case "b":
 		if len(m.history) > 0 {
 			last := m.history[len(m.history)-1]
@@ -285,6 +354,14 @@ func (m Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "s":
 		m.stopPlayback("Остановлено")
 	case "n":
+		if m.radioMode && m.queue.remaining() == 0 {
+			if m.radioLoading {
+				m.radioResume = true
+				m.statusText = "Жду продолжение радио"
+				return m, nil
+			}
+			return m.refillRadio(m.currentTrack, true)
+		}
 		if next := m.queue.next(true); next >= 0 {
 			return m.beginQueuedPlayback(next)
 		}
@@ -347,6 +424,10 @@ func (m Model) beginPlayback(index int) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	selected := m.tracks[index]
+	m.radioMode = false
+	m.radioLoading = false
+	m.radioResume = false
+	m.radioRequest++
 	queueIndex := m.queue.replace(m.tracks, selected.URL)
 	return m.beginQueuedPlayback(queueIndex)
 }
@@ -366,7 +447,32 @@ func (m Model) beginQueuedPlayback(index int) (tea.Model, tea.Cmd) {
 	m.playback = playbackLoading
 	m.errorText = ""
 	m.statusText = "Получаю аудиопоток"
-	return m, startPlaybackCmd(m.catalog, track, m.playRequest)
+	play := startPlaybackCmd(m.catalog, track, m.playRequest)
+	if m.radioMode && !m.radioLoading && m.queue.remaining() <= 3 {
+		updated, refill := m.refillRadio(track, false)
+		m = updated.(Model)
+		return m, tea.Batch(play, refill)
+	}
+	return m, play
+}
+
+func (m Model) startRadio(seed soundcloud.Track) (tea.Model, tea.Cmd) {
+	m.radioRequest++
+	m.radioLoading = true
+	m.errorText = ""
+	m.statusText = "Строю радио по треку: " + seed.Title
+	return m, stationCmd(m.catalog, seed, m.radioRequest, true, false)
+}
+
+func (m Model) refillRadio(seed soundcloud.Track, autoPlay bool) (tea.Model, tea.Cmd) {
+	if m.radioLoading {
+		return m, nil
+	}
+	m.radioRequest++
+	m.radioLoading = true
+	m.errorText = ""
+	m.statusText = "Подбираю продолжение радио"
+	return m, stationCmd(m.catalog, seed, m.radioRequest, false, autoPlay)
 }
 
 func (m Model) currentIndex(tracks []soundcloud.Track) int {
@@ -410,6 +516,9 @@ func (m Model) repeatLabel() string {
 func (m *Model) stopPlayback(status string) {
 	m.player.Stop()
 	m.playRequest++
+	m.radioRequest++
+	m.radioLoading = false
+	m.radioResume = false
 	m.playback = playbackStopped
 	m.statusText = status
 }
@@ -452,6 +561,15 @@ type playbackEndedMsg struct {
 	err     error
 }
 
+type stationResultMsg struct {
+	seed     soundcloud.Track
+	tracks   []soundcloud.Track
+	err      error
+	request  int
+	initial  bool
+	autoPlay bool
+}
+
 var spinnerFrames = []string{"·  ", "·· ", "···", " ··", "  ·", "   "}
 
 func tickCmd() tea.Cmd {
@@ -482,6 +600,15 @@ func collectionCmd(c catalog, collection soundcloud.Track, title string, request
 		defer cancel()
 		tracks, err := c.Expand(ctx, collection)
 		return searchResultMsg{tracks: tracks, err: err, browse: true, title: title, request: request}
+	}
+}
+
+func stationCmd(c catalog, seed soundcloud.Track, request int, initial, autoPlay bool) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		tracks, err := c.Station(ctx, seed)
+		return stationResultMsg{seed: seed, tracks: tracks, err: err, request: request, initial: initial, autoPlay: autoPlay}
 	}
 }
 

@@ -38,3 +38,17 @@ func TestQueueRepeatModes(t *testing.T) {
 		t.Fatalf("repeat one = %d, want 1", got)
 	}
 }
+
+func TestQueueAppendsOnlyUniquePlayableTracks(t *testing.T) {
+	queue := newPlaybackQueue()
+	queue.tracks = []soundcloud.Track{{URL: "one"}}
+	first := queue.appendUnique([]soundcloud.Track{
+		{URL: "one"}, {URL: "two"}, {URL: "set", Collection: true}, {URL: "three"},
+	})
+	if first != 1 {
+		t.Fatalf("first appended index = %d, want 1", first)
+	}
+	if len(queue.tracks) != 3 || queue.tracks[2].URL != "three" {
+		t.Fatalf("unexpected queue: %#v", queue.tracks)
+	}
+}

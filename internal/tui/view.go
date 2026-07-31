@@ -51,7 +51,7 @@ func (m Model) View() string {
 		out.WriteString(m.renderTracks(contentWidth))
 	}
 
-	footerHeight := 7
+	footerHeight := 9
 	used := strings.Count(out.String(), "\n") + footerHeight
 	if innerHeight > used {
 		out.WriteString(strings.Repeat("\n", innerHeight-used))
@@ -138,7 +138,7 @@ func (m Model) renderEmptyState(width int) string {
 }
 
 func (m Model) renderTracks(width int) string {
-	available := max(3, m.height-16)
+	available := max(3, m.height-18)
 	start := 0
 	if m.cursor >= available {
 		start = m.cursor - available + 1
@@ -187,6 +187,8 @@ func viewLabel(view string) string {
 		return "МОИ ЛАЙКИ"
 	case "history":
 		return "ИСТОРИЯ"
+	case "radio":
+		return "РАДИО ПО ТРЕКУ  ∞"
 	default:
 		return "РЕЗУЛЬТАТЫ"
 	}
@@ -209,12 +211,19 @@ func (m Model) renderPlayer(width int) string {
 	}
 	trackLine := fmt.Sprintf("%s %s  %s · %s", stateIcon, state, m.currentTrack.Title, m.currentTrack.Artist)
 	elapsed := int(m.elapsed().Seconds())
-	progress := m.renderProgress(max(8, min(34, width-22)), elapsed, m.currentTrack.Duration)
+	waveWidth := max(8, width)
+	wave := buildWaveform(m.currentTrack, waveWidth, m.waveFrame)
+	head := waveformHead(waveWidth, elapsed, m.currentTrack.Duration)
+	waveTop := renderWaveformRow(wave.top, head)
+	waveBottom := renderWaveformRow(wave.bottom, head)
 	timeText := formatDuration(elapsed) + " / " + formatDuration(m.currentTrack.Duration)
 	position, total := m.queue.position()
 	queueText := fmt.Sprintf("ОЧЕРЕДЬ %d/%d", position, total)
-	progressGap := strings.Repeat(" ", max(1, width-lipgloss.Width(progress+timeText+queueText)-2))
-	progressLine := progress + "  " + timeText + progressGap + queueText
+	if m.radioMode {
+		queueText = fmt.Sprintf("РАДИО ∞  %d/%d", position, total)
+	}
+	timeGap := strings.Repeat(" ", max(1, width-lipgloss.Width(timeText+queueText)))
+	timeLine := timeText + timeGap + queueText
 
 	volume := fmt.Sprintf("VOL %3d%% %s", m.volume, volumeMeter(m.volume, m.muted))
 	shuffle := "SHUFFLE OFF"
@@ -225,19 +234,31 @@ func (m Model) renderPlayer(width int) string {
 	if m.muted {
 		modes = "MUTED   " + modes
 	}
-	return separator + "\n" + playing.Render(truncate(trackLine, width)) + "\n" + truncate(progressLine, width) + "\n" + mutedText.Render(truncate(modes, width))
+	return separator + "\n" + playing.Render(truncate(trackLine, width)) + "\n" + waveTop + "\n" + waveBottom + "\n" + truncate(timeLine, width) + "\n" + mutedText.Render(truncate(modes, width))
 }
 
-func (m Model) renderProgress(width, elapsed, duration int) string {
+func waveformHead(width, elapsed, duration int) int {
 	if width < 1 {
+		return 0
+	}
+	if duration <= 0 {
+		return elapsed % width
+	}
+	return min(width, max(0, elapsed*width/duration))
+}
+
+func renderWaveformRow(row []rune, head int) string {
+	if len(row) == 0 {
 		return ""
 	}
-	filled := 0
-	if duration > 0 {
-		filled = min(width, max(0, elapsed*width/duration))
+	head = min(len(row), max(0, head))
+	passed := string(row[:head])
+	if head == len(row) {
+		return playing.Render(passed)
 	}
-	return lipgloss.NewStyle().Foreground(orange).Render(strings.Repeat("━", filled)) +
-		lipgloss.NewStyle().Foreground(panel).Render(strings.Repeat("─", width-filled))
+	cursor := "│"
+	future := string(row[head+1:])
+	return playing.Render(passed) + header.Render(cursor) + mutedText.Render(future)
 }
 
 func volumeMeter(volume int, muted bool) string {
@@ -250,7 +271,7 @@ func volumeMeter(volume int, muted bool) string {
 
 func (m Model) renderStatusAndHelp(width int) string {
 	status := m.statusText
-	if m.searching {
+	if m.searching || m.radioLoading {
 		status = spinnerFrames[m.spinner] + " " + status
 	}
 	if m.errorText != "" {
@@ -259,7 +280,7 @@ func (m Model) renderStatusAndHelp(width int) string {
 		status = mutedText.Render(truncate(status, width))
 	}
 
-	help := "Enter открыть/играть  Space пауза  n/p трек  +/- громкость  x mute  z shuffle  r repeat  ? помощь"
+	help := "Enter играть  a радио ∞  Space пауза  n/p трек  +/- громкость  x mute  z shuffle  r repeat  ?"
 	if m.searchFocus {
 		help = "Enter искать  Esc к списку  Ctrl+C выход"
 	}
@@ -269,12 +290,12 @@ func (m Model) renderStatusAndHelp(width int) string {
 func (m Model) renderHelp(width int) string {
 	title := header.Render("УПРАВЛЕНИЕ") + mutedText.Render("  ·  ? или Esc закрыть")
 	columns := []string{
-		"НАВИГАЦИЯ                 ПЛЕЕР                    ОЧЕРЕДЬ",
-		"↑/↓  j/k   выбор          Space  пауза            n/p  след/пред",
-		"Enter      открыть        +/-    громкость        z    shuffle",
-		"/          поиск          x      mute             r    repeat",
-		"b          назад          s      остановить       q    выход",
-		"m/l/h      разделы",
+		"НАВИГАЦИЯ                 ПЛЕЕР                    РАДИО / ОЧЕРЕДЬ",
+		"↑/↓  j/k   выбор          Space  пауза            a    радио по треку",
+		"Enter      открыть        +/-    громкость        n/p  след/пред",
+		"b          назад          x      mute             z    shuffle",
+		"/          поиск          s      остановить       r    repeat",
+		"m/l/h      разделы        q      выход",
 	}
 	lines := []string{title, ""}
 	for _, line := range columns {
